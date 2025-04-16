@@ -83,7 +83,7 @@ class cleanup extends scheduled_task {
         $accesstokenrecordset->close();
 
         if ($accesstokensdeleted) {
-            mtrace("Deleted " . count($accesstokenrecordset . " expired access tokens."));
+            mtrace("Deleted " . $accesstokensdeleted . " expired access tokens.");
         } else {
             mtrace("No expired access tokens found.");
         }
