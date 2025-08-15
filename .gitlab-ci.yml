@@ -1,9 +1,9 @@
-image: moodlehq/moodle-php-apache:8.1   # Defines PHP version image to use.
+image: moodlehq/moodle-php-apache:8.2   # Defines PHP version image to use.
 
 services:
   - name: selenium/standalone-chrome:3
     alias: behat
-  - name: mysql:8.0
+  - name: mysql:8.4
     alias: db
     command:
       - '--character-set-server=utf8mb4'
