@@ -77,6 +77,36 @@ if (isloggedin() && !isguestuser()) {
     }
 
     $server->handleAuthorizeRequest($request, $response, $isauthorized, $USER->id);
+// If successful authorization (302 with Location), capture the auth code and store nonce
+//    try {
+        // Only proceed if we have a nonce in the incoming request
+        $nonce = optional_param('nonce', null, PARAM_TEXT);
+        if (!empty($nonce) && $response->getStatusCode() == 302) {
+            // Extract the code=... from the Location header
+            $headers = $response->getHttpHeaders();
+            if (!empty($headers['Location'])) {
+                $location = $headers['Location'];
+                $parts = parse_url($location);
+                if (!empty($parts['query'])) {
+                    parse_str($parts['query'], $q);
+                    if (!empty($q['code'])) {
+                        $code = $q['code'];
+                        global $DB;
+                        $record = new stdClass();
+                        $record->code = $code;
+                        $record->nonce = $nonce;
+                        $record->createdat = time();
+                        // Table name with Moodle prefix
+                        $DB->insert_record('local_oauth2_nonce', $record);
+                    }
+                }
+            }
+        }
+//    } catch (\Throwable $e) {
+//        // Non-fatal: do not break the OAuth redirect even if we couldn't store the nonce
+//        // Consider logging with error_log() or Moodle debugging if needed
+//    }
+
     $response->send();
 } else {
     $SESSION->wantsurl = $url;

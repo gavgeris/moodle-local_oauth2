@@ -9,7 +9,7 @@
                 <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
                 <FIELD NAME="client_id" TYPE="char" LENGTH="100" NOTNULL="true" SEQUENCE="false"/>
                 <FIELD NAME="client_secret" TYPE="char" LENGTH="100" NOTNULL="true" SEQUENCE="false"/>
-                <FIELD NAME="redirect_uri" TYPE="char" LENGTH="1333" NOTNULL="false" SEQUENCE="false"/>
+                <FIELD NAME="redirect_uri" TYPE="char" LENGTH="5000" NOTNULL="false" SEQUENCE="false"/>
                 <FIELD NAME="scope" TYPE="char" LENGTH="1333" NOTNULL="false" SEQUENCE="false"/>
             </FIELDS>
             <KEYS>
@@ -97,12 +97,24 @@
             <FIELDS>
                 <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
                 <FIELD NAME="client_id" TYPE="char" LENGTH="80" NOTNULL="true" SEQUENCE="false"/>
-                <FIELD NAME="public_key" TYPE="char" LENGTH="1333" NOTNULL="true" SEQUENCE="false"/>
-                <FIELD NAME="private_key" TYPE="char" LENGTH="1333" NOTNULL="true" SEQUENCE="false"/>
+                <FIELD NAME="public_key" TYPE="char" LENGTH="5000" NOTNULL="true" SEQUENCE="false"/>
+                <FIELD NAME="private_key" TYPE="char" LENGTH="5000" NOTNULL="true" SEQUENCE="false"/>
                 <FIELD NAME="encryption_algorithm" TYPE="char" LENGTH="100" NOTNULL="true" SEQUENCE="false"/>
             </FIELDS>
             <KEYS>
                 <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+            </KEYS>
+        </TABLE>
+        <TABLE NAME="local_oauth2_nonce" COMMENT="Stores OIDC nonce bound to an authorization code for later inclusion in id_token.">
+            <FIELDS>
+                <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+                <FIELD NAME="code" TYPE="char" LENGTH="128" NOTNULL="true" SEQUENCE="false"/>
+                <FIELD NAME="nonce" TYPE="char" LENGTH="255" NOTNULL="true" SEQUENCE="false"/>
+                <FIELD NAME="createdat" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false"/>
+            </FIELDS>
+            <KEYS>
+                <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+                <KEY NAME="code_uk" TYPE="unique" FIELDS="code"/>
             </KEYS>
         </TABLE>
     </TABLES>
