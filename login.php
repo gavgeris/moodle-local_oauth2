@@ -1,114 +1,104 @@
 <?php
-// This file is part of Moodle - http://moodle.org/
-//
-// Moodle is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// Moodle is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+// local/oauth2/login.php — Authorization Endpoint with resilient nonce handling
+use core\session\manager;
+use OAuth2\Request;
+use OAuth2\Response;
 
-/**
- * OAuth2 authentication authorization endpoint.
- *
- * @package local_oauth2
- * @author Pau Ferrer Ocaña <pferre22@xtec.cat>
- * @author Lai Wei <lai.wei@enovation.ie>
- * @author Dorel Manolescu <dorel.manolescu@enovation.ie>
- * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
- * @copyright (C) 2025 Enovation Solutions
- */
-
-use local_oauth2\event\user_granted;
-use local_oauth2\event\user_not_granted;
-
-// phpcs:ignore moodle.Files.RequireLogin.Missing -- This file is used to log in users.
 require_once(__DIR__ . '/../../config.php');
 
-$clientid = required_param('client_id', PARAM_TEXT);
-$responsetype = required_param('response_type', PARAM_TEXT);
-$scope = optional_param('scope', false, PARAM_TEXT);
-$state = optional_param('state', false, PARAM_TEXT);
-$url = new moodle_url('/local/oauth2/login.php', ['client_id' => $clientid, 'response_type' => $responsetype]);
+// --- EARLY CAPTURE: Store nonce by state in session BEFORE any login redirects ---
+$state = optional_param('state', null, PARAM_ALPHANUMEXT);
+// Nonce can be fairly free-form; keep it trimmed and cap length to 255 (table limit).
+$nonce_raw = optional_param('nonce', null, PARAM_RAW_TRIMMED);
+$nonce = $nonce_raw !== null ? mb_substr($nonce_raw, 0, 255) : null;
 
-if ($scope) {
-    $url->param('scope', $scope);
+if (!empty($state) && !empty($nonce)) {
+    if (!isset($SESSION->local_oauth2_state_nonce) || !is_array($SESSION->local_oauth2_state_nonce)) {
+        $SESSION->local_oauth2_state_nonce = [];
+    }
+    // Record/overwrite the nonce for this state. This survives CAS redirects.
+    $SESSION->local_oauth2_state_nonce[$state] = $nonce;
 }
 
-if ($state) {
-    $url->param('state', $state);
-}
+// Ensure the user is logged in (CAS may redirect). Session mapping above persists across redirects.
+require_login();
 
-$PAGE->set_url($url);
-$PAGE->set_context(context_system::instance());
-$PAGE->set_pagelayout('login');
+// Release session lock while we talk to the OAuth2 server.
+manager::write_close();
 
-if (isloggedin() && !isguestuser()) {
-    $server = local_oauth2\utils::get_oauth_server();
+// Load OAuth2 lib (bshaffer)
+require_once($CFG->dirroot . '/local/oauth2/vendor/bshaffer/oauth2-server-php/src/OAuth2/Autoloader.php');
+OAuth2\Autoloader::register();
 
-    $request = OAuth2\Request::createFromGlobals();
-    $response = new OAuth2\Response();
+/** @var \OAuth2\Server $server */
+$server   = local_oauth2\utils::get_oauth_server();
+$request  = Request::createFromGlobals();
+$response = new Response();
 
-    if (!$server->validateAuthorizeRequest($request, $response)) {
-        $logparams = ['objectid' => $USER->id, 'other' => ['clientid' => $clientid, 'scope' => $scope]];
+// Since the user is logged-in, auto-approve. Add consent UI here if you need it.
+$isauthorized = true;
+$userid = $USER->id;
 
-        $event = user_not_granted::create($logparams);
-        $event->trigger();
+// Handle the authorization request. On success, this prepares a 302 with ?code=...&state=...
+$server->handleAuthorizeRequest($request, $response, $isauthorized, $userid);
 
-        $response->send();
-        die();
-    }
+/**
+ * POST-AUTH: Bind code -> nonce.
+ * We extract ?code and ?state from the Location header the OAuth2 server set,
+ * look up the nonce from session using 'state', and persist (code, nonce) to DB.
+ */
+try {
+    if ($response->getStatusCode() == 302) {
+        $headers = $response->getHttpHeaders();
+        if (!empty($headers['Location'])) {
+            $location = $headers['Location'];
+            $parts = parse_url($location);
+            if (!empty($parts['query'])) {
+                parse_str($parts['query'], $q);
 
-    $isauthorized = local_oauth2\utils::get_authorization_from_form($url, $clientid, $scope);
+                $code  = $q['code']  ?? null;
+                $stret = $q['state'] ?? ($state ?? null); // fallback if lib doesn't echo state
 
-    $logparams = ['objectid' => $USER->id, 'other' => ['clientid' => $clientid, 'scope' => $scope]];
-    if ($isauthorized) {
-        $event = user_granted::create($logparams);
-        $event->trigger();
-    } else {
-        $event = user_not_granted::create($logparams);
-        $event->trigger();
-    }
+                // Prefer the nonce just provided in THIS request, else pick from session by state
+                $nonce_to_store = $nonce;
+                if (empty($nonce_to_store) && !empty($stret)
+                    && !empty($SESSION->local_oauth2_state_nonce[$stret])) {
+                    $nonce_to_store = $SESSION->local_oauth2_state_nonce[$stret];
+                }
 
-    $server->handleAuthorizeRequest($request, $response, $isauthorized, $USER->id);
-// If successful authorization (302 with Location), capture the auth code and store nonce
-//    try {
-        // Only proceed if we have a nonce in the incoming request
-        $nonce = optional_param('nonce', null, PARAM_TEXT);
-        if (!empty($nonce) && $response->getStatusCode() == 302) {
-            // Extract the code=... from the Location header
-            $headers = $response->getHttpHeaders();
-            if (!empty($headers['Location'])) {
-                $location = $headers['Location'];
-                $parts = parse_url($location);
-                if (!empty($parts['query'])) {
-                    parse_str($parts['query'], $q);
-                    if (!empty($q['code'])) {
-                        $code = $q['code'];
-                        global $DB;
-                        $record = new stdClass();
-                        $record->code = $code;
-                        $record->nonce = $nonce;
-                        $record->createdat = time();
-                        // Table name with Moodle prefix
-                        $DB->insert_record('local_oauth2_nonce', $record);
+                if (!empty($code) && !empty($nonce_to_store)) {
+                    global $DB;
+                    $rec = (object)[
+                        'code'      => $code,
+                        'nonce'     => $nonce_to_store,
+                        'createdat' => time(),
+                    ];
+                    // Insert with unique(code); if exists, update.
+                    try {
+                        $DB->insert_record('local_oauth2_nonce', $rec);
+                    } catch (dml_write_exception $ex) {
+                        if ($exists = $DB->get_record('local_oauth2_nonce', ['code' => $code])) {
+                            $exists->nonce     = $nonce_to_store;
+                            $exists->createdat = $rec->createdat;
+                            $DB->update_record('local_oauth2_nonce', $exists);
+                        } else {
+                            debugging('local_oauth2_nonce insert failed: ' . $ex->getMessage(), DEBUG_DEVELOPER);
+                        }
                     }
+                }
+
+                // Clean up the session entry for this state (one-time use)
+                if (!empty($stret) && !empty($SESSION->local_oauth2_state_nonce[$stret])) {
+                    unset($SESSION->local_oauth2_state_nonce[$stret]);
                 }
             }
         }
-//    } catch (\Throwable $e) {
-//        // Non-fatal: do not break the OAuth redirect even if we couldn't store the nonce
-//        // Consider logging with error_log() or Moodle debugging if needed
-//    }
-
-    $response->send();
-} else {
-    $SESSION->wantsurl = $url;
-    redirect(new moodle_url('/login/index.php'));
+    }
+} catch (Throwable $e) {
+    // Never break the OAuth redirect on bookkeeping failure
+    debugging('Nonce binding error: ' . $e->getMessage(), DEBUG_DEVELOPER);
 }
+
+// Send the response prepared by the OAuth2 server (302 or JSON error)
+$response->send();
+exit;

@@ -37,7 +37,7 @@ try {
         $keyrecord->public_key = $publickey;
         $keyrecord->private_key = $privatekey;
         $keyrecord->encryption_algorithm = 'RS256';
-        
+        echo strlen($privatekey);
         $result = $DB->insert_record('local_oauth2_public_key', $keyrecord);
         
         if ($result) {
