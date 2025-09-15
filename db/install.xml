@@ -97,8 +97,8 @@
             <FIELDS>
                 <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
                 <FIELD NAME="client_id" TYPE="char" LENGTH="80" NOTNULL="true" SEQUENCE="false"/>
-                <FIELD NAME="public_key" TYPE="char" LENGTH="5000" NOTNULL="true" SEQUENCE="false"/>
-                <FIELD NAME="private_key" TYPE="char" LENGTH="5000" NOTNULL="true" SEQUENCE="false"/>
+                <FIELD NAME="public_key" TYPE="text" LENGTH="5000" NOTNULL="true" SEQUENCE="false"/>
+                <FIELD NAME="private_key" TYPE="text" LENGTH="5000" NOTNULL="true" SEQUENCE="false"/>
                 <FIELD NAME="encryption_algorithm" TYPE="char" LENGTH="100" NOTNULL="true" SEQUENCE="false"/>
             </FIELDS>
             <KEYS>
