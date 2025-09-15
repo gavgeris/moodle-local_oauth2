@@ -9,7 +9,7 @@
                 <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
                 <FIELD NAME="client_id" TYPE="char" LENGTH="100" NOTNULL="true" SEQUENCE="false"/>
                 <FIELD NAME="client_secret" TYPE="char" LENGTH="100" NOTNULL="true" SEQUENCE="false"/>
-                <FIELD NAME="redirect_uri" TYPE="char" LENGTH="5000" NOTNULL="false" SEQUENCE="false"/>
+                <FIELD NAME="redirect_uri" TYPE="char" LENGTH="1333" NOTNULL="false" SEQUENCE="false"/>
                 <FIELD NAME="scope" TYPE="char" LENGTH="1333" NOTNULL="false" SEQUENCE="false"/>
             </FIELDS>
             <KEYS>
