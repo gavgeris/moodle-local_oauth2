@@ -1,75 +1,208 @@
-# OAuth2 Server Plugin for Moodle
+# Matrix-Moodle SSO Integration με OIDC
 
-It provides an [OAuth2](https://tools.ietf.org/html/rfc6749 "RFC6749") server so that a user can use its Moodle account to log in to external applications.
-Oauth2 Library has been taken from https://github.com/bshaffer/oauth2-server-php
+Το plugin αυτό επιτρέπει την διασύνδεση Single Sign-On ανάμεσα σε Matrix server και Moodle χρησιμοποιώντας OIDC (OpenID Connect).
 
-## Requirements
-* #### Moodle 4.5 or higher installed
-* #### Admin account
+## Infrastructure
 
-## Installation steps
-1. Download the plugin from Moodle plugins directory or from GitHub repository.
+- **Moodle**: https://learn.dimos.sch.gr (με CAS authentication από sch.gr)
+- **Matrix**: https://matrix.dimos.dev.ellak.gr
+- **Element**: https://chat.dimos.dev.ellak.gr
+- **Target room**: `#rooma:matrix.dimos.dev.ellak.gr`
 
-2. Extract the files if you downloaded a zip file.
+## Moodle Setup
 
-3. Create a folder "oauth2" in the "local" directory of your Moodle installation. Copy the files from the plugin into this folder.
+### Prerequisites
 
-4. Login to the site as site administrator.
+- **OAuth2 plugin**: [local_oauth2](https://github.com/gavgeris/moodle-local_oauth2.git)
+- **OAuth client**: `matrix-dimos-client`
+- **Scopes**: `openid profile email login` (space-separated)
 
-5. Go to *Site Administration > Server > OAuth2 server > Manage OAuth clients*
+## Αρχεία που Δημιουργήθηκαν
 
-6. Click *Add OAuth client*
+```
+/local/oauth2/
+├── jwks.php                    # JWKS endpoint
+├── userinfo.php                # UserInfo endpoint
+├── token_oidc.php              # Custom token endpoint with id_token
+├── openid_configuration.php    # Discovery document
+├── create_keys.php             # Key generation script
+└── debug_token.php             # Debug script
+```
 
-7. Fill in the form. Your Client Identifier and Client Secret (which will be given later) will be used for you to authenticate. The Redirect URL must be the URL mapping to your client that will be used.
+### File Descriptions
 
-## How to get an access token
+| File | Purpose |
+|------|---------|
+| `jwks.php` | Provides JSON Web Key Set for JWT signature verification |
+| `userinfo.php` | Returns user information claims |
+| `token_oidc.php` | Handles token exchange and generates id_token (JWT) |
+| `openid_configuration.php` | OpenID Connect discovery document |
+| `create_keys.php` | Generates RSA key pair and stores in database |
+| `debug_token.php` | Debug utility to test token generation |
 
-1. From your application, redirect the user to this URL: `http://moodledomain.com/local/oauth2/login.php?client_id=EXAMPLE&response_type=code` *(remember to replace the URL domain with the domain of Moodle and replace EXAMPLE with the Client Identifier given in the form.)*
+## Matrix Configuration
 
-2. The user must log in to Moodle and authorize your application to use its basic info.
+Add the following to your Matrix `homeserver.yaml`:
 
-3. If it went all OK, the plugin should redirect the user to something like: `http://yourapplicationdomain.com/foo?code=55c057549f29c428066cbbd67ca6b17099cb1a9e` *(that's a GET request to the Redirect URI given with the code parameter)*
+```yaml
+enable_registration: true
+enable_registration_without_verification: true
 
-4. Using the code given, your application must send a POST request to `http://moodledomain.com/local/oauth2/token.php`  with the following parameters: `{'code': '55c057549f29c428066cbbd67ca6b17099cb1a9e', 'client_id': 'EXAMPLE', 'client_secret': 'codeGivenAfterTheFormWasFilled', 'grant_type': 'authorization_code', 'scope': '[SCOPES SEPARATED BY COMMA]'}`. 
+oidc_providers:
+  - idp_id: moodle_dimos
+    idp_name: "Σύνδεση με ΔΗΜΩΣ"
+    discover: false
+    authorization_endpoint: "https://learn.dimos.sch.gr/local/oauth2/login.php"
+    token_endpoint: "https://learn.dimos.sch.gr/local/oauth2/token_oidc.php"
+    userinfo_endpoint: "https://learn.dimos.sch.gr/local/oauth2/userinfo.php"
+    jwks_uri: "https://learn.dimos.sch.gr/local/oauth2/jwks.php"
+    issuer: "https://learn.dimos.sch.gr/local/oauth2"
+    client_id: "matrix-dimos-client"
+    client_secret: "YOUR_CLIENT_SECRET_HERE"  # The secret key from Moodle
+    client_auth_method: "client_secret_post"
+    scopes: ["openid", "profile", "email", "login"]
+    user_mapping_provider:
+      config:
+        localpart_template: "{{ user.preferred_username }}"
+        display_name_template: "{{ user.name }}"
+        email_template: "{{ user.email }}"
+    allow_existing_users: true
+```
 
-5. If the correct credentials were given, the response should a JSON be like this: `{"access_token":"79d687a0ea4910c6662b2e38116528fdcd65f0d1","expires_in":3600,"token_type":"Bearer","scope":"[SCOPES]","refresh_token":"c1de730eef1b2072b48799000ec7cde4ea6d2af0"}`
+## Installation Steps
 
-6. The access_token is the one you will use to make requests to the Moodle API. The refresh_token is used to get a new access_token when the current one expires.
+### 1. Install Moodle OAuth2 Plugin
 
-Note: If testing in Postman, you need to set encoding to `x-www-form-urlencoded` for POST requests.
+```bash
+cd /path/to/moodle/local
+git clone https://github.com/gavgeris/moodle-local_oauth2.git oauth2
+```
 
-## How to use the refresh token
+### 2. Create OAuth Client in Moodle
 
-When the access_token expires, your application must request a new one using the refresh_token.
+1. Navigate to: **Site Administration > Server > OAuth2 server > Manage OAuth clients**
+2. Click **Add OAuth client**
+3. Fill in:
+    - **Client Name**: Matrix DIMOS
+    - **Client Identifier**: `matrix-dimos-client`
+    - **Redirect URI**: `https://matrix.dimos.dev.ellak.gr/_synapse/client/oidc/callback`
+    - **Scopes**: `openid profile email login`
+4. Save and note the generated **Client Secret**
 
-1. Endpoint
-Send a POST request to: `http://moodledomain.com/local/oauth2/refresh_token.php`  with the following
-2. Request parameters: `{'client_id': 'EXAMPLE', 'client_secret': 'codeGivenAfterTheFormWasFilled', 'grant_type': 'refresh_token', 'refresh_token': 'c1de730eef1b2072b48799000ec7cde4ea6d2af0}`.
-(See step 6 above for details on the refresh token.)
 
-3. Response
-If the request is successful, the response will contain a new access token and a new refresh token:
-`{
-    "access_token": "1703c39b0a9e462e2430a2e53da3299696bdefd5",
-    "expires_in": 10800,
-    "token_type": "Bearer",
-    "scope": "[SCOPES SEPARATED BY COMMA]",
-    "refresh_token": "c3150439e43649595a7b753ee1e99e041ee6aa0a"
-}`.
+### 3. Verify Endpoints
 
-4. Implementation Notes
-   •	Use the new access_token for API requests.
-   •	Replace the old refresh_token with the new one provided in the response.
-   •	If the refresh_token itself expires, the user must authenticate again to obtain new credentials.
+Test each endpoint:
+
+```bash
+# JWKS endpoint
+curl https://learn.dimos.sch.gr/local/oauth2/jwks.php
+
+# Discovery document
+curl https://learn.dimos.sch.gr/local/oauth2/openid_configuration.php
+
+# UserInfo (requires access token)
+curl -H "Authorization: Bearer YOUR_TOKEN" \
+     https://learn.dimos.sch.gr/local/oauth2/userinfo.php
+```
+
+### 4. Configure Matrix
+
+Add the configuration from "Matrix Configuration" section to your `homeserver.yaml`.
+
+### 8. Restart Matrix
+
+```bash
+docker-compose restart matrix-synapse
+# or
+systemctl restart matrix-synapse
+```
+
+## Usage
+
+### Direct Room Links
+
+Users can access Matrix rooms directly from Moodle using URLs like:
+
+```
+https://chat.dimos.dev.ellak.gr/#/room/#rooma:matrix.dimos.dev.ellak.gr
+```
+
+When not authenticated, they will be redirected to:
+1. Moodle OAuth authorization
+2. CAS authentication (if not logged in to Moodle)
+3. Back to Matrix with SSO credentials
+
+### OAuth Flow
+
+1. **User clicks Matrix login** → Redirected to Moodle
+2. **Moodle authenticates** → Via CAS if needed
+3. **User authorizes Matrix** → Consent screen
+4. **Authorization code** → Sent back to Matrix
+5. **Token exchange** → Matrix gets access_token + id_token
+6. **User creation/login** → Matrix creates/logs in user
+
+## Troubleshooting
+
+### Check Logs
+
+**Matrix logs:**
+```bash
+docker logs matrix-synapse -f
+```
+
+**Moodle logs:**
+```bash
+docker exec -it moodle bash
+tail -f /opt/bitnami/apache/logs/error_log
+```
+
+### Common Issues
+
+#### 404 Error on Token Endpoint
+- Verify file exists: `/local/oauth2/token_oidc.php`
+- Check file permissions: `644`
+- Verify web server can read the file
+
+#### Invalid Scope Error
+- Ensure scopes in Moodle client match Matrix config
+- Scopes must be space-separated in Moodle
+
+#### Missing id_token Error
+- Run `create_keys.php` to generate RSA keys
+- Verify keys exist in database:
+```sql
+SELECT * FROM mdl_local_oauth2_public_key WHERE client_id = 'global_jwks_key';
+```
+
+#### JWKS Error
+- Test JWKS endpoint manually
+- Verify RSA keys are properly formatted
+- Check OpenSSL is available: `php -m | grep openssl`
+
+### Debug Mode
+
+Use the debug script to test token generation:
+
+```
+https://learn.dimos.sch.gr/local/oauth2/debug_token.php
+```
+
+## Security Considerations
+
+- Store client secrets securely
+- Use HTTPS for all endpoints
+- Regularly rotate RSA keys
+- Monitor OAuth access logs
+- Restrict redirect URIs to trusted domains
+
+## License
+
+CC-BY-SA
 
 ## Contributors
-Apart from people in this repository, the plugin has been created based on the [local_oauth project] (https://github.com/projectestac/moodle-local_oauth) with the following contributors:
 
-- [crazyserver] https://github.com/crazyserver
-- [monicagrau] https://github.com/monicagrau
-- [toniginard] https://github.com/toniginard
-- [sarajona] https://github.com/sarjona
-- [lfzawacki] https://github.com/lfzawacki
-- [ignacioabejaro] https://github.com/ignacioabejaro
-- [umerf52] https://github.com/umerf52
 
+## Support
+
+For issues and questions, please open an issue on GitHub.
